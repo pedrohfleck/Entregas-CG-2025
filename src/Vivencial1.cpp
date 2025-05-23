@@ -1,3 +1,5 @@
+// Vivencial1.cpp - Versão extendida para múltiplos objetos com seleção e transformação e cores diferentes
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -14,19 +16,24 @@ using namespace std;
 // Janela
 const GLuint WINDOW_WIDTH = 1000, WINDOW_HEIGHT = 1000;
 
-// Estados globais
-bool rotatingX = false, rotatingY = false, rotatingZ = false;
-glm::vec3 objectTranslation(0.0f);
-float objectScale = 1.0f;
+// === Classe para representar um objeto 3D ===
+struct Object3D {
+    GLuint vao;
+    int vertexCount;
+    glm::vec3 position;
+    glm::vec3 rotation;
+    float scale;
+    glm::vec3 color;
+};
 
-GLuint modelVAO;
-int modelVertices = 0;
+vector<Object3D> objects;
+int selectedObjectIndex = 0;
 
-// === Função para carregar arquivos OBJ ===
-int loadSimpleOBJ(string filePATH, int &nVertices) {
+// === Função para carregar arquivos OBJ simples ===
+// Agora recebe a cor do objeto para aplicar no buffer
+int loadSimpleOBJ(string filePATH, int &nVertices, const glm::vec3& color) {
     vector<glm::vec3> vertices;
     vector<GLfloat> vBuffer;
-    glm::vec3 color(1.0f, 0.0f, 0.0f);  // vermelho
 
     ifstream file(filePATH);
     if (!file.is_open()) {
@@ -95,20 +102,29 @@ uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
 
-out vec4 vertexColor;
+out vec3 vertexColor;
 
 void main() {
     gl_Position = projection * view * model * vec4(position, 1.0);
-    vertexColor = vec4(color, 1.0);
+    vertexColor = color;
 }
 )";
 
 const char* fragmentShaderSource = R"(
 #version 450 core
-in vec4 vertexColor;
+in vec3 vertexColor;
 out vec4 fragColor;
+
+uniform int selectedObject;
+uniform int currentObject; // passado pelo código para identificar o objeto atual
+
 void main() {
-    fragColor = vertexColor;
+    // Se for o objeto selecionado, destacamos a cor (ex: amarelo)
+    if (selectedObject == currentObject) {
+        fragColor = vec4(1.0, 1.0, 0.0, 1.0); // amarelo vivo
+    } else {
+        fragColor = vec4(vertexColor, 1.0);
+    }
 }
 )";
 
@@ -116,37 +132,66 @@ void handleKeyboard(GLFWwindow* window, int key, int scancode, int action, int m
 GLuint createShaderProgram();
 void configureOpenGL(GLFWwindow* window);
 
-int main() {
-    glfwInit();
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Vivencial 1 - Evelyn, Pedro e Thiago", nullptr, nullptr);
-    configureOpenGL(window);
+void printInstructions() {
+    cout << "===== Controles da Aplicação =====" << endl;
+    cout << "TAB           : Selecionar próximo objeto" << endl;
+    cout << "ESC           : Fechar aplicação" << endl;
+    cout << "X, Y, Z       : Rotacionar objeto selecionado nos eixos X, Y e Z" << endl;
+    cout << "W, A, S, D    : Mover objeto selecionado para frente, esquerda, trás e direita" << endl;
+    cout << "I, J          : Mover objeto selecionado para cima e para baixo" << endl;
+    cout << "[             : Diminuir escala do objeto selecionado" << endl;
+    cout << "]             : Aumentar escala do objeto selecionado" << endl;
+    cout << "===================================" << endl;
+}
 
-    cout << "=== Controles ===\n"
-         << "X / Y / Z - Alternar rotação\n"
-         << "W/A/S/D/I/J - Translação\n"
-         << "[ e ] - Escala -/+\n"
-         << "ESC - Sair\n";
+int main() {
+    if (!glfwInit()) {
+        cerr << "Falha ao inicializar GLFW" << endl;
+        return -1;
+    }
+
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Vivencial 1 - Objetos Múltiplos", nullptr, nullptr);
+    if (!window) {
+        cerr << "Falha ao criar janela GLFW" << endl;
+        glfwTerminate();
+        return -1;
+    }
+
+    configureOpenGL(window);
+    printInstructions();
 
     GLuint shader = createShaderProgram();
 
-    // Carregar modelo
-    modelVAO = loadSimpleOBJ("../assets/Modelos3D/Suzanne.obj", modelVertices);
-    if (modelVAO == -1) return -1;
-
-    // Uniforms
     GLint modelLoc = glGetUniformLocation(shader, "model");
     GLint viewLoc = glGetUniformLocation(shader, "view");
     GLint projLoc = glGetUniformLocation(shader, "projection");
+    GLint selectedObjLoc = glGetUniformLocation(shader, "selectedObject");
+    GLint currentObjLoc = glGetUniformLocation(shader, "currentObject");
 
     glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, -8));
     glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)WINDOW_WIDTH / WINDOW_HEIGHT, 0.1f, 100.0f);
 
-    // Offsets dos objetos
-    vector<glm::vec3> objOffsets = {
-        {-2.0f, 0.0f, 0.0f},
-        { 0.0f, 0.0f, 0.0f},
-        { 2.0f, 0.0f, 0.0f}
+    vector<glm::vec3> positions = {{-2, 0, 0}, {0, 0, 0}, {2, 0, 0}};
+    vector<glm::vec3> colors = {
+        {1.0f, 0.0f, 0.0f},  // vermelho
+        {0.0f, 1.0f, 0.0f},  // verde
+        {0.0f, 0.0f, 1.0f}   // azul
     };
+
+    for (size_t i = 0; i < positions.size(); ++i) {
+        int nVerts;
+        GLuint vao = loadSimpleOBJ("../assets/Modelos3D/Suzanne.obj", nVerts, colors[i]);
+        if (vao == -1) return -1;
+
+        Object3D obj;
+        obj.vao = vao;
+        obj.vertexCount = nVerts;
+        obj.position = positions[i];
+        obj.rotation = glm::vec3(0);
+        obj.scale = 1.0f;
+        obj.color = colors[i];
+        objects.push_back(obj);
+    }
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -156,26 +201,27 @@ int main() {
 
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+        glUniform1i(selectedObjLoc, selectedObjectIndex);
 
-        for (const auto& offset : objOffsets) {
+        for (size_t i = 0; i < objects.size(); ++i) {
+            Object3D& obj = objects[i];
             glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, offset + objectTranslation);
-            model = glm::scale(model, glm::vec3(objectScale));
-
-            float time = glfwGetTime();
-            if (rotatingX) model = glm::rotate(model, time, glm::vec3(1, 0, 0));
-            if (rotatingY) model = glm::rotate(model, time, glm::vec3(0, 1, 0));
-            if (rotatingZ) model = glm::rotate(model, time, glm::vec3(0, 0, 1));
+            model = glm::translate(model, obj.position);
+            model = glm::rotate(model, obj.rotation.x, glm::vec3(1, 0, 0));
+            model = glm::rotate(model, obj.rotation.y, glm::vec3(0, 1, 0));
+            model = glm::rotate(model, obj.rotation.z, glm::vec3(0, 0, 1));
+            model = glm::scale(model, glm::vec3(obj.scale));
 
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-            glBindVertexArray(modelVAO);
-            glDrawArrays(GL_TRIANGLES, 0, modelVertices);
+            glUniform1i(currentObjLoc, (int)i);
+
+            glBindVertexArray(obj.vao);
+            glDrawArrays(GL_TRIANGLES, 0, obj.vertexCount);
         }
 
         glfwSwapBuffers(window);
     }
 
-    glDeleteVertexArrays(1, &modelVAO);
     glfwTerminate();
     return 0;
 }
@@ -183,7 +229,10 @@ int main() {
 void configureOpenGL(GLFWwindow* window) {
     glfwMakeContextCurrent(window);
     glfwSetKeyCallback(window, handleKeyboard);
-    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+        cerr << "Falha ao inicializar GLAD" << endl;
+        exit(-1);
+    }
     glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
     glEnable(GL_DEPTH_TEST);
 }
@@ -191,19 +240,22 @@ void configureOpenGL(GLFWwindow* window) {
 void handleKeyboard(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (action != GLFW_PRESS) return;
 
+    Object3D& obj = objects[selectedObjectIndex];
+
     switch (key) {
         case GLFW_KEY_ESCAPE: glfwSetWindowShouldClose(window, true); break;
-        case GLFW_KEY_X: rotatingX = !rotatingX; break;
-        case GLFW_KEY_Y: rotatingY = !rotatingY; break;
-        case GLFW_KEY_Z: rotatingZ = !rotatingZ; break;
-        case GLFW_KEY_W: objectTranslation.z -= 0.1f; break;
-        case GLFW_KEY_S: objectTranslation.z += 0.1f; break;
-        case GLFW_KEY_A: objectTranslation.x -= 0.1f; break;
-        case GLFW_KEY_D: objectTranslation.x += 0.1f; break;
-        case GLFW_KEY_I: objectTranslation.y += 0.1f; break;
-        case GLFW_KEY_J: objectTranslation.y -= 0.1f; break;
-        case GLFW_KEY_LEFT_BRACKET: objectScale = max(0.1f, objectScale - 0.1f); break;
-        case GLFW_KEY_RIGHT_BRACKET: objectScale += 0.1f; break;
+        case GLFW_KEY_TAB: selectedObjectIndex = (selectedObjectIndex + 1) % objects.size(); break;
+        case GLFW_KEY_X: obj.rotation.x += glm::radians(15.0f); break;
+        case GLFW_KEY_Y: obj.rotation.y += glm::radians(15.0f); break;
+        case GLFW_KEY_Z: obj.rotation.z += glm::radians(15.0f); break;
+        case GLFW_KEY_W: obj.position.z -= 0.1f; break;
+        case GLFW_KEY_S: obj.position.z += 0.1f; break;
+        case GLFW_KEY_A: obj.position.x -= 0.1f; break;
+        case GLFW_KEY_D: obj.position.x += 0.1f; break;
+        case GLFW_KEY_I: obj.position.y += 0.1f; break;
+        case GLFW_KEY_J: obj.position.y -= 0.1f; break;
+        case GLFW_KEY_LEFT_BRACKET: obj.scale = max(0.1f, obj.scale - 0.1f); break;
+        case GLFW_KEY_RIGHT_BRACKET: obj.scale += 0.1f; break;
     }
 }
 
@@ -212,14 +264,36 @@ GLuint createShaderProgram() {
     glShaderSource(vertex, 1, &vertexShaderSource, nullptr);
     glCompileShader(vertex);
 
+    GLint success;
+    glGetShaderiv(vertex, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetShaderInfoLog(vertex, 512, nullptr, infoLog);
+        cerr << "Erro no vertex shader:\n" << infoLog << endl;
+    }
+
     GLuint fragment = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment, 1, &fragmentShaderSource, nullptr);
     glCompileShader(fragment);
+
+    glGetShaderiv(fragment, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetShaderInfoLog(fragment, 512, nullptr, infoLog);
+        cerr << "Erro no fragment shader:\n" << infoLog << endl;
+    }
 
     GLuint program = glCreateProgram();
     glAttachShader(program, vertex);
     glAttachShader(program, fragment);
     glLinkProgram(program);
+
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetProgramInfoLog(program, 512, nullptr, infoLog);
+        cerr << "Erro ao linkar shader program:\n" << infoLog << endl;
+    }
 
     glDeleteShader(vertex);
     glDeleteShader(fragment);
