@@ -49,6 +49,7 @@ set(EXERCISES
     SpherePhong
     Vivencial1
     Cubo3D
+    ObjTextura
 )
 
 add_compile_options(-Wno-pragmas)
