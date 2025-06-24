@@ -51,6 +51,8 @@ set(EXERCISES
     Cubo3D
     ObjTextura
     ObjIluminado
+    Camera
+    CameraTest
 )
 
 add_compile_options(-Wno-pragmas)
