@@ -52,7 +52,7 @@ set(EXERCISES
     ObjTextura
     ObjIluminado
     Camera
-    CameraTest
+    Trajetoria
 )
 
 add_compile_options(-Wno-pragmas)
